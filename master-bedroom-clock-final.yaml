@@ -1,0 +1,1430 @@
+esphome:
+  name: bedroom-clock
+  friendly_name: Bedroom Clock
+  platformio_options:
+    board_upload.maximum_ram_size: 524288
+    build_unflags: -Werror=all
+    board_build.flash_mode: dio
+
+  on_boot:
+    priority: -100
+    then:
+      - delay: 5s
+      - lambda: |-
+          // Force Weather Icons
+          id(day0_cond).publish_state(id(day0_cond).state);
+          id(day1_cond).publish_state(id(day1_cond).state);
+          id(day2_cond).publish_state(id(day2_cond).state);
+          id(day3_cond).publish_state(id(day3_cond).state);
+          id(current_cond).publish_state(id(current_cond).state);
+          
+          // Force Temps to draw immediately
+          auto set_temp = [&](lv_obj_t* label, float hi, float lo) {
+            if (std::isnan(hi) || std::isnan(lo)) {
+              lv_label_set_text(label, "-- / --");
+              return;
+            }
+            char buffer[20];
+            sprintf(buffer, "%.0f°/%.0f°", hi, lo);
+            lv_label_set_text(label, buffer);
+          };
+          set_temp(id(day0_temp), id(day0_high).state, id(day0_low).state);
+          set_temp(id(day1_temp), id(day1_high).state, id(day1_low).state);
+          set_temp(id(day2_temp), id(day2_high).state, id(day2_low).state);
+          set_temp(id(day3_temp), id(day3_high).state, id(day3_low).state);
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: "tZwVZvSvrduX/R85XQdmGMdxMaXBCP/I8wiBmqM8gkY="
+
+logger:
+  hardware_uart: UART0
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.1.192
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+i2c:
+  sda: GPIO08
+  scl: GPIO09
+  scan: True
+  id: bus_a
+
+ch422g:
+  - id: ch422g_hub
+
+output:
+  - platform: gpio
+    id: lcdbacklight_output
+    pin:
+      ch422g: ch422g_hub
+      number: 2
+      mode:
+        output: true
+      inverted: false
+
+light:
+  - platform: binary
+    output: lcdbacklight_output
+    id: lcdbacklight
+    name: LCD Backlight
+    icon: mdi:wall-sconce-flat-outline
+    disabled_by_default: true
+    restore_mode: ALWAYS_ON
+    on_turn_off:
+      - script.execute: start_antiburn
+    on_turn_on:
+      - script.execute: stop_antiburn
+
+script:
+  - id: start_antiburn
+    then:
+      - delay: 5min
+      - logger.log: Starting automatic antiburn.
+      - switch.turn_on: switch_antiburn
+  - id: stop_antiburn
+    then:
+      - script.stop: start_antiburn
+      - switch.turn_off: switch_antiburn
+
+switch:
+  - platform: template
+    name: Antiburn
+    id: switch_antiburn
+    icon: mdi:television-shimmer
+    optimistic: true
+    entity_category: "config"
+    disabled_by_default: true
+    turn_on_action:
+      - logger.log: "Starting Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+      - lvgl.pause:
+          show_snow: true
+    turn_off_action:
+      - logger.log: "Stopping Antiburn"
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+
+##############################    IMAGES   ######################################
+
+
+image:
+  # BACKGROUND
+  - file: "images/bedroom clock/background.png"
+    id: bg_image
+    type: RGB565
+    resize: 800x480
+
+  # WEATHER ICONS (Cleaned & Optimized)
+  - file: "images/bedroom clock/weather/sunny.png"
+    id: img_sunny
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/cloudy.png"
+    id: img_cloudy
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/partlycloudy.png"
+    id: img_partlycloudy
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/fog.png"
+    id: img_fog
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/rainy.png"
+    id: img_rainy
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/lightning.png"
+    id: img_lightning
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+  - file: "images/bedroom clock/weather/snowy.png"
+    id: img_snowy
+    type: RGB565
+    transparency: alpha_channel
+    dither: NONE
+    resize: 75x75
+
+
+
+####################  FONTS   ######################
+
+font:
+  - file: "gfonts://Montserrat"
+    id: clock_font
+    size: 120
+
+  - file: "gfonts://Montserrat"
+    id: temp_font_large
+    size: 100
+
+  - file: "gfonts://Montserrat"
+    id: montserrat_48
+    size: 48
+
+  - file: "gfonts://Montserrat"
+    id: montserrat_28
+    size: 28
+
+  - file: "gfonts://Montserrat"
+    id: montserrat_20
+    size: 20
+
+        ########################  BOTTOM ROW BUTTON FONTS   ##############
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 10
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_garage
+    size: 40           
+    glyphs:
+      - "\U000F12D3"  # garage-open
+      - "\U000F12D4"  # garage-closed
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_lock
+    size: 40
+    glyphs:
+      - "\U000F0CCC"  # shield-lock-outline
+      - "\U000F199A"  # shield-outline
+
+# Pull time from Home Assistant
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      - seconds: 0
+        then:
+          # CLOCK
+          - lvgl.label.update:
+              id: clock_label
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                char buffer[16];
+                int hour = now.hour;
+                bool pm = hour >= 12;
+
+                if (hour == 0) hour = 12;
+                else if (hour > 12) hour -= 12;
+
+                sprintf(buffer, "%d:%02d %s",
+                        hour,
+                        now.minute,
+                        pm ? "PM" : "AM");
+
+                return std::string(buffer);
+
+          # DAY NAME (Monday)
+          - lvgl.label.update:
+              id: date_day_label
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                const char* days[] = {
+                  "Sunday","Monday","Tuesday",
+                  "Wednesday","Thursday","Friday","Saturday"
+                };
+                return std::string(days[now.day_of_week - 1]);
+
+          # FULL DATE (Feb 16, 2026)
+          - lvgl.label.update:
+              id: date_full_label
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                const char* months[] = {
+                  "Jan","Feb","Mar","Apr","May","Jun",
+                  "Jul","Aug","Sep","Oct","Nov","Dec"
+                };
+                char buffer[32];
+                sprintf(buffer, "%s %d, %d",
+                        months[now.month - 1],
+                        now.day_of_month,
+                        now.year);
+                return std::string(buffer);
+
+          # Day labels (Today, next three weekdays)
+          - lvgl.label.update:
+              id: day0_name
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                if (!now.is_valid()) return std::string("___");
+                return std::string("Today");
+
+          - lvgl.label.update:
+              id: day1_name
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                if (!now.is_valid()) return std::string("___");
+                const char* days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+                int today = now.day_of_week - 1;
+                return std::string(days[(today + 1) % 7]);
+
+          - lvgl.label.update:
+              id: day2_name
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                if (!now.is_valid()) return std::string("___");
+                const char* days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+                int today = now.day_of_week - 1;
+                return std::string(days[(today + 2) % 7]);
+
+          - lvgl.label.update:
+              id: day3_name
+              text: !lambda |-
+                auto now = id(ha_time).now();
+                if (!now.is_valid()) return std::string("___");
+                const char* days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+                int today = now.day_of_week - 1;
+                return std::string(days[(today + 3) % 7]);
+
+#######################    Weather Sensors  ###############################
+
+sensor:
+  - platform: homeassistant
+    id: current_temp_sensor
+    entity_id: sensor.current_weather_temp
+    internal: true
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: current_temp_label
+            text: !lambda |-
+              if (std::isnan(x)) return "---°";
+              return str_sprintf("%.0f°", x);
+
+  - platform: homeassistant
+    id: day0_high
+    entity_id: sensor.forecast_day0_high
+
+  - platform: homeassistant
+    id: day0_low
+    entity_id: sensor.forecast_day0_low
+
+  - platform: homeassistant
+    id: day1_high
+    entity_id: sensor.forecast_day1_high
+
+  - platform: homeassistant
+    id: day1_low
+    entity_id: sensor.forecast_day1_low
+
+  - platform: homeassistant
+    id: day2_high
+    entity_id: sensor.forecast_day2_high
+
+  - platform: homeassistant
+    id: day2_low
+    entity_id: sensor.forecast_day2_low
+
+  - platform: homeassistant
+    id: day3_high
+    entity_id: sensor.forecast_day3_high
+
+  - platform: homeassistant
+    id: day3_low
+    entity_id: sensor.forecast_day3_low
+
+########################    Forcast Sensors   ##############
+
+text_sensor:
+  - platform: homeassistant
+    id: day0_cond
+    entity_id: sensor.forecast_day0_condition
+    on_value:
+      then:
+        - lambda: |-
+            lv_img_dsc_t *img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            if (x == "sunny") img = (lv_img_dsc_t*)id(img_sunny)->get_lv_img_dsc();
+            else if (x == "partlycloudy") img = (lv_img_dsc_t*)id(img_partlycloudy)->get_lv_img_dsc();
+            else if (x == "cloudy" || x == "overcast") img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            else if (x == "fog") img = (lv_img_dsc_t*)id(img_fog)->get_lv_img_dsc();
+            else if (x == "rainy" || x == "pouring") img = (lv_img_dsc_t*)id(img_rainy)->get_lv_img_dsc();
+            else if (x == "lightning" || x == "lightning-rainy") img = (lv_img_dsc_t*)id(img_lightning)->get_lv_img_dsc();
+            else if (x == "snowy" || x == "snowy-rainy") img = (lv_img_dsc_t*)id(img_snowy)->get_lv_img_dsc();
+            
+            lv_img_set_src(id(day0_icon_img), img);
+
+  - platform: homeassistant
+    id: day1_cond
+    entity_id: sensor.forecast_day1_condition
+    on_value:
+      then:
+        - lambda: |-
+            lv_img_dsc_t *img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            if (x == "sunny") img = (lv_img_dsc_t*)id(img_sunny)->get_lv_img_dsc();
+            else if (x == "partlycloudy") img = (lv_img_dsc_t*)id(img_partlycloudy)->get_lv_img_dsc();
+            else if (x == "cloudy" || x == "overcast") img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            else if (x == "fog") img = (lv_img_dsc_t*)id(img_fog)->get_lv_img_dsc();
+            else if (x == "rainy" || x == "pouring") img = (lv_img_dsc_t*)id(img_rainy)->get_lv_img_dsc();
+            else if (x == "lightning" || x == "lightning-rainy") img = (lv_img_dsc_t*)id(img_lightning)->get_lv_img_dsc();
+            else if (x == "snowy" || x == "snowy-rainy") img = (lv_img_dsc_t*)id(img_snowy)->get_lv_img_dsc();
+            
+            lv_img_set_src(id(day1_icon_img), img);
+
+  - platform: homeassistant
+    id: day2_cond
+    entity_id: sensor.forecast_day2_condition
+    on_value:
+      then:
+        - lambda: |-
+            lv_img_dsc_t *img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            if (x == "sunny") img = (lv_img_dsc_t*)id(img_sunny)->get_lv_img_dsc();
+            else if (x == "partlycloudy") img = (lv_img_dsc_t*)id(img_partlycloudy)->get_lv_img_dsc();
+            else if (x == "cloudy" || x == "overcast") img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            else if (x == "fog") img = (lv_img_dsc_t*)id(img_fog)->get_lv_img_dsc();
+            else if (x == "rainy" || x == "pouring") img = (lv_img_dsc_t*)id(img_rainy)->get_lv_img_dsc();
+            else if (x == "lightning" || x == "lightning-rainy") img = (lv_img_dsc_t*)id(img_lightning)->get_lv_img_dsc();
+            else if (x == "snowy" || x == "snowy-rainy") img = (lv_img_dsc_t*)id(img_snowy)->get_lv_img_dsc();
+            
+            lv_img_set_src(id(day2_icon_img), img);
+
+  - platform: homeassistant
+    id: day3_cond
+    entity_id: sensor.forecast_day3_condition
+    on_value:
+      then:
+        - lambda: |-
+            lv_img_dsc_t *img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            if (x == "sunny") img = (lv_img_dsc_t*)id(img_sunny)->get_lv_img_dsc();
+            else if (x == "partlycloudy") img = (lv_img_dsc_t*)id(img_partlycloudy)->get_lv_img_dsc();
+            else if (x == "cloudy" || x == "overcast") img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            else if (x == "fog") img = (lv_img_dsc_t*)id(img_fog)->get_lv_img_dsc();
+            else if (x == "rainy" || x == "pouring") img = (lv_img_dsc_t*)id(img_rainy)->get_lv_img_dsc();
+            else if (x == "lightning" || x == "lightning-rainy") img = (lv_img_dsc_t*)id(img_lightning)->get_lv_img_dsc();
+            else if (x == "snowy" || x == "snowy-rainy") img = (lv_img_dsc_t*)id(img_snowy)->get_lv_img_dsc();
+            
+            lv_img_set_src(id(day3_icon_img), img);
+
+
+  - platform: homeassistant
+    id: current_cond
+    entity_id: weather.forecast_home
+    on_value:
+      then:
+        - lambda: |-
+            lv_img_dsc_t *img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            if (x == "sunny" || x == "clear-night") img = (lv_img_dsc_t*)id(img_sunny)->get_lv_img_dsc();
+            else if (x == "partlycloudy") img = (lv_img_dsc_t*)id(img_partlycloudy)->get_lv_img_dsc();
+            else if (x == "cloudy" || x == "overcast") img = (lv_img_dsc_t*)id(img_cloudy)->get_lv_img_dsc();
+            else if (x == "fog") img = (lv_img_dsc_t*)id(img_fog)->get_lv_img_dsc();
+            else if (x == "rainy" || x == "pouring") img = (lv_img_dsc_t*)id(img_rainy)->get_lv_img_dsc();
+            else if (x == "lightning" || x == "lightning-rainy") img = (lv_img_dsc_t*)id(img_lightning)->get_lv_img_dsc();         
+            else if (x == "snowy" || x == "snowy-rainy") img = (lv_img_dsc_t*)id(img_snowy)->get_lv_img_dsc();
+            
+            lv_img_set_src(id(current_icon_img), img);
+
+  ################   BOTTOM ROW BUTTON SENSORS     ##############
+
+  - platform: homeassistant
+    id: shed_door_state_1                    #####   DOOR 1
+    entity_id: cover.shed_door_1_4
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_1), "\U000F12D4"); // Open Icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(255, 0, 0), LV_PART_MAIN); // Red
+            } else if (strcmp(state, "opening") == 0 || strcmp(state, "closing") == 0) {
+              // Same icon for both moving states, or you can pick a specific one
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(255, 165, 0), LV_PART_MAIN); // Orange
+            } else {
+              lv_label_set_text(id(shed_garage_icon_1), "\U000F12D3"); // Closed Icon
+              lv_obj_set_style_text_color(id(shed_garage_icon_1), lv_color_make(0, 200, 0), LV_PART_MAIN); // Green
+            }
+
+  - platform: homeassistant
+    id: shed_door_state_2             # DOOR 2
+    entity_id: cover.shed_door_2_5
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_2), "\U000F12D4"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(255, 0, 0), LV_PART_MAIN); 
+            } else if (strcmp(state, "opening") == 0 || strcmp(state, "closing") == 0) {
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(255, 165, 0), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(shed_garage_icon_2), "\U000F12D3"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_2), lv_color_make(0, 200, 0), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant
+    id: shed_door_state_3             # DOOR 3
+    entity_id: cover.shed_door_3_6
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_3), "\U000F12D4"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(255, 0, 0), LV_PART_MAIN); 
+            } else if (strcmp(state, "opening") == 0 || strcmp(state, "closing") == 0) {
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(255, 165, 0), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(shed_garage_icon_3), "\U000F12D3"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_3), lv_color_make(0, 200, 0), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant
+    id: shed_door_state_4             # DOOR 4
+    entity_id: cover.shed_door_4_7
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_4), "\U000F12D4"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(255, 0, 0), LV_PART_MAIN); 
+            } else if (strcmp(state, "opening") == 0 || strcmp(state, "closing") == 0) {
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(255, 165, 0), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(shed_garage_icon_4), "\U000F12D3"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_4), lv_color_make(0, 200, 0), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant
+    id: shed_door_state_5             # WEST DOOR
+    entity_id: cover.shed_door_west_3
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_5), "\U000F12D4"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(255, 0, 0), LV_PART_MAIN); 
+            } else if (strcmp(state, "opening") == 0 || strcmp(state, "closing") == 0) {
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(255, 165, 0), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(shed_garage_icon_5), "\U000F12D3"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_5), lv_color_make(0, 200, 0), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant
+    id: shop_door_state               # Shop Door
+    entity_id: cover.shop_garage_door_shop_garage_door
+    on_value:
+      then:
+        - lambda: |-
+            auto state = x.c_str();
+            if (strcmp(state, "open") == 0) {
+              lv_label_set_text(id(shed_garage_icon_6), "\U000F12D4"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(255, 0, 0), LV_PART_MAIN); 
+            } else if (strcmp(state, "closed") != 0) { // Catch-all for opening/closing/moving
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(255, 165, 0), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(shed_garage_icon_6), "\U000F12D3"); 
+              lv_obj_set_style_text_color(id(shed_garage_icon_6), lv_color_make(0, 200, 0), LV_PART_MAIN); 
+            }
+   
+   ################        Door Locks       #############################
+
+  - platform: homeassistant          # Front Door Lock
+    id: front_door_state
+    entity_id: lock.front_door_lock_6
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              lv_label_set_text(id(front_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(front_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(front_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(front_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant        #  Back Door
+    id: back_door_state
+    entity_id: lock.back_door_lock_13
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              lv_label_set_text(id(back_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(back_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(back_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(back_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant        # Shed West Door
+    id: shed_west_door_state
+    entity_id: lock.touchpad_electronic_deadbolt
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              lv_label_set_text(id(west_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(west_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(west_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(west_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+            }
+
+  - platform: homeassistant       # Shed East Door
+    id: shed_east_door_state
+    entity_id: lock.shed_east_door_lock_2
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "locked") {
+              lv_label_set_text(id(east_door_icon), "\U000F0CCC");
+              lv_obj_set_style_text_color(id(east_door_icon), lv_color_hex(0x00C800), LV_PART_MAIN); 
+            } else {
+              lv_label_set_text(id(east_door_icon), "\U000F199A");
+              lv_obj_set_style_text_color(id(east_door_icon), lv_color_hex(0xC80000), LV_PART_MAIN); 
+            }
+
+
+
+
+interval:
+  - interval: 5min
+    then:
+      - lambda: |-
+          auto set_temp = [&](lv_obj_t* label, float hi, float lo) {
+            if (std::isnan(hi) || std::isnan(lo)) {
+              lv_label_set_text(label, "-- / --");
+              return;
+            }
+            char buffer[20];
+            sprintf(buffer, "%.0f°/%.0f°", hi, lo);
+            lv_label_set_text(label, buffer);
+          };
+
+          // Update day labels (optional here if you also do it in time.on_time)
+          auto now = id(ha_time).now();
+          if (now.is_valid()) {
+            const char* days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+            int today = now.day_of_week - 1;
+            lv_label_set_text(id(day0_name), "Today");
+            lv_label_set_text(id(day1_name), days[(today + 1) % 7]);
+            lv_label_set_text(id(day2_name), days[(today + 2) % 7]);
+            lv_label_set_text(id(day3_name), days[(today + 3) % 7]);
+          }
+
+          // Temps
+          set_temp(id(day0_temp), id(day0_high).state, id(day0_low).state);
+          set_temp(id(day1_temp), id(day1_high).state, id(day1_low).state);
+          set_temp(id(day2_temp), id(day2_high).state, id(day2_low).state);
+          set_temp(id(day3_temp), id(day3_high).state, id(day3_low).state);
+
+
+ 
+ ####################### Lock Template to make locks toggle ###########################
+
+lock:
+  - platform: template           # Front Door Lock
+    name: "Front Door Lock"
+    id: front_door_lock
+    lambda: |-
+      return (id(front_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.front_door_lock_6}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.front_door_lock_6}
+
+  - platform: template       # Back Door
+    name: "Back Door Lock"
+    id: back_door_lock_proxy
+    lambda: |-
+      return (id(back_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.back_door_lock_13}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.back_door_lock_13}
+
+  - platform: template         # Shed West Door
+    name: "Shed West Door"
+    id: shed_west_door
+    lambda: |-
+      return (id(shed_west_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.touchpad_electronic_deadbolt}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.touchpad_electronic_deadbolt}
+
+  - platform: template         # Shed East Door
+    name: "Shed East Door"
+    id: shed_east_door
+    lambda: |-
+      return (id(shed_east_door_state).state == "locked") ? lock::LOCK_STATE_LOCKED : lock::LOCK_STATE_UNLOCKED;
+    lock_action:
+      - homeassistant.service:
+          service: lock.lock
+          data: {entity_id: lock.shed_east_door_lock_2}
+    unlock_action:
+      - homeassistant.service:
+          service: lock.unlock
+          data: {entity_id: lock.shed_east_door_lock_2}
+
+#######################################################
+#                     LVGL UI
+#######################################################
+
+lvgl:
+  disp_bg_color: 0x000000
+  buffer_size: 20%
+
+  pages:
+    - id: main_page
+      widgets:
+        # LAYER 1: Master Container (The "Stage" for all content)        
+        - obj:
+            width: 800
+            height: 480
+            pad_all: 0
+            bg_opa: TRANSP
+            border_width: 0
+            outline_width: 0
+            outline_opa: 0%
+            shadow_width: 0
+            scrollbar_mode: "OFF"
+            scrollable: false
+            widgets:
+              
+              # LAYER 2: Safety Background (Solid color if image fails)
+              - obj:
+                  id: bg_fill
+                  width: 800
+                  height: 480
+                  bg_color: 0x000000
+                  bg_opa: 100%
+                  border_width: 0
+                  border_opa: 0%
+                  outline_width: 0
+                  outline_opa: 0%
+                  shadow_width: 0
+
+              # LAYER 3: Background Wallpaper
+              - image:
+                  id: bg_img
+                  src: bg_image
+                  width: 100%
+                  height: 100%
+
+              # LAYER 4: Foreground UI (Houses the Clock, Weather, and Grid)
+              - obj:
+                  width: 800
+                  height: 480
+                  pad_all: 0
+                  bg_opa: TRANSP
+                  border_width: 0
+                  outline_width: 0
+                  outline_opa: 0%
+                  shadow_width: 0
+                  scrollbar_mode: "OFF"
+                  scrollable: false
+                  layout:
+                    type: flex
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 100%
+                        pad_left: 20
+                        pad_right: 20
+                        bg_opa: 0%
+                        border_width: 0
+                        border_opa: 0%
+                        outline_width: 0
+                        outline_opa: 0%
+                        shadow_width: 0
+                        bg_color: 0x000000
+                        scrollbar_mode: "OFF"
+                        scrollable: false
+  
+
+                        layout:
+                          type: grid
+                          grid_columns: ["500", "300"]
+                          grid_rows: [160, 220, 100]
+                        widgets:
+
+                          # TOP LEFT: CLOCK
+                          - obj:
+                              id: clock_card
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 0
+                              grid_cell_x_align: STRETCH
+                              grid_cell_y_align: STRETCH
+                              pad_all: 0
+                              bg_opa: TRANSP
+                              border_width: 0
+                              border_color: 0x000000
+                              border_opa: 100%
+                              layout:
+                                type: flex
+                                flex_align_main: CENTER
+                                flex_align_cross: CENTER
+                              widgets:
+                                - label:
+                                    id: clock_label
+                                    text: "--:--"
+                                    text_font: clock_font
+                                    text_color: 0xFFFFFF
+
+
+
+                          # TOP RIGHT: DATE
+                          - obj:
+                              id: date_card
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 1
+                              grid_cell_x_align: STRETCH
+                              grid_cell_y_align: STRETCH
+                              pad_all: 0
+                              bg_opa: TRANSP
+                              border_width: 0
+                              border_color: 0x000000
+                              border_opa: 100%
+                              layout:
+                                type: flex
+                                flex_flow: column
+                                flex_align_main: CENTER
+                                flex_align_cross: CENTER
+                              widgets:
+                                - label:
+                                    id: date_day_label
+                                    width: 100%
+                                    text: "Monday"
+                                    text_font: montserrat_48
+                                    text_color: 0xFFFFFF
+                                    text_align: CENTER
+
+                                - label:
+                                    id: date_full_label
+                                    width: 100%
+                                    text: "Feb 16, 2026"
+                                    text_font: montserrat_28
+                                    text_color: 0xFFFFFF
+                                    text_align: CENTER
+
+
+
+                          # ROW 1 LEFT: FORECAST WRAPPER
+                          - obj:
+                              id: forecast_wrapper
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 0
+                              grid_cell_x_align: STRETCH
+                              grid_cell_y_align: STRETCH
+                              pad_top: 0
+                              pad_bottom: 0
+                              pad_left: 0
+                              pad_right: 0
+                              radius: 18
+                              # bg_color: 0x000000
+                              bg_opa: TRANSP
+                              border_width: 0
+                              border_color: 0x000000
+                              border_opa: 100%
+                              layout:
+                                type: flex
+                                flex_flow: row
+                                flex_align_main: SPACE_BETWEEN
+                                flex_align_cross: STRETCH
+
+
+                              widgets:
+
+
+                                # DAY 0
+                                - obj:
+                                    id: day0_card
+                                    width: 23%
+                                    height: 100%
+                                    pad_all: 0
+                                    radius: 16
+                                    bg_color: 0x000000
+                                    bg_opa: TRANSP
+                                    border_width: 0
+                                    border_color: 0x000000
+                                    border_opa: 100%
+                                    outline_width: 0
+                                    shadow_width: 0
+                                    layout:
+                                      type: flex
+                                      flex_flow: column
+                                      flex_align_main: SPACE_EVENLY
+                                      flex_align_cross: CENTER
+                                    widgets:
+                                      - label:
+                                          id: day0_name
+                                          width: 100%
+                                          text: "Today"
+                                          text_font: montserrat_20
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+                                      - image:
+                                          id: day0_icon_img
+                                          src: img_cloudy
+                                      - label:
+                                          id: day0_temp
+                                          width: 100%
+                                          text: "--°/--°"
+                                          text_font: montserrat_28
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+
+                                # DAY 1
+                                - obj:
+                                    id: day1_card
+                                    width: 23%
+                                    height: 100%
+                                    pad_all: 0
+                                    radius: 16
+                                    bg_color: 0x000000
+                                    bg_opa: TRANSP
+                                    border_width: 0
+                                    border_color: 0x000000
+                                    border_opa: 100%
+                                    outline_width: 0
+                                    shadow_width: 0
+                                    layout:
+                                      type: flex
+                                      flex_flow: column
+                                      flex_align_main: SPACE_EVENLY
+                                      flex_align_cross: CENTER
+                                    widgets:
+                                      - label:
+                                          id: day1_name
+                                          width: 100%
+                                          text: "---"
+                                          text_font: montserrat_20
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+                                      - image:
+                                          id: day1_icon_img
+                                          src: img_cloudy
+                                      - label:
+                                          id: day1_temp
+                                          width: 100%
+                                          text: "--°/--°"
+                                          text_font: montserrat_28
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+
+                                # DAY 2
+                                - obj:
+                                    id: day2_card
+                                    width: 23%
+                                    height: 100%
+                                    pad_all: 0
+                                    radius: 16
+                                    bg_color: 0x000000
+                                    bg_opa: TRANSP
+                                    border_width: 0
+                                    border_color: 0x000000
+                                    border_opa: 100%
+                                    outline_width: 0
+                                    shadow_width: 0
+                                    layout:
+                                      type: flex
+                                      flex_flow: column
+                                      flex_align_main: SPACE_EVENLY
+                                      flex_align_cross: CENTER
+                                    widgets:
+                                      - label:
+                                          id: day2_name
+                                          width: 100%
+                                          text: "---"
+                                          text_font: montserrat_20
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+                                      - image:
+                                          id: day2_icon_img
+                                          src: img_cloudy
+                                      - label:
+                                          id: day2_temp
+                                          width: 100%
+                                          text: "--°/--°"
+                                          text_font: montserrat_28
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+
+                                # DAY 3
+                                - obj:
+                                    id: day3_card
+                                    width: 23%
+                                    height: 100%
+                                    pad_all: 0
+                                    radius: 16
+                                    bg_color: 0x000000
+                                    bg_opa: TRANSP
+                                    border_width: 0
+                                    border_color: 0x000000
+                                    border_opa: TRANSP
+                                    outline_width: 0
+                                    shadow_width: 0
+                                    layout:
+                                      type: flex
+                                      flex_flow: column
+                                      flex_align_main: SPACE_EVENLY
+                                      flex_align_cross: CENTER
+                                    widgets:
+                                      - label:
+                                          id: day3_name
+                                          width: 100%
+                                          text: "---"
+                                          text_font: montserrat_20
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+                                      - image:
+                                          id: day3_icon_img
+                                          src: img_cloudy
+                                      - label:
+                                          id: day3_temp
+                                          width: 100%
+                                          text: "--°/--°"
+                                          text_font: montserrat_28
+                                          text_color: 0xFFFFFF
+                                          text_align: CENTER
+
+
+
+                          # ROW 1 RIGHT: CURRENT TEMP + CURRENT ICON
+                          - obj:
+                              id: current_card
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 1
+                              grid_cell_x_align: STRETCH
+                              grid_cell_y_align: STRETCH
+                              pad_all: 0
+                              bg_opa: TRANSP
+                              border_width: 0
+                              border_color: 0xFF0000
+                              border_opa: 100%
+                              widgets:
+                                - image:
+                                    id: current_icon_img
+                                    src: img_sunny
+                                    align: TOP_MID
+                                    y: 18
+
+                                - label:
+                                    id: current_temp_label
+                                    width: 100%
+                                    text: "--°"
+                                    text_font: temp_font_large
+                                    text_color: 0xFFFFFF
+                                    text_align: CENTER
+                                    align: BOTTOM_MID
+                                    y: -18
+
+                          # BOTTOM ROW: SQUARES
+                          - obj:
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 0
+                              grid_cell_column_span: 2
+                              width: 800
+                              height: 100
+                              pad_all: 0
+                              bg_opa: TRANSP
+                              border_width: 0
+                              layout:
+                                type: flex
+                                flex_flow: row
+                                flex_align_main: SPACE_EVENLY
+                                flex_align_cross: CENTER
+                              widgets:
+                                # --- SQUARE 1 ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0        
+                                    border_width: 0   
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0         
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shed_door_1_4}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_1, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "Door #1", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 2 ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shed_door_2_5}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_2, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "Door #2", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 3 ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shed_door_3_6}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_3, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "Door #3", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 4 ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shed_door_4_7}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_4, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "Door #4", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 5 (West) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shed_door_west_3}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_5, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "West", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 6 (Shop) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - homeassistant.service:
+                                                service: cover.toggle
+                                                data: {entity_id: cover.shop_garage_door_shop_garage_door}
+                                          widgets:
+                                            - label: {id: shed_garage_icon_6, text_font: mdi_garage, text: "\U000F12D3", pad_all: 0}
+                                            - label: {text: "Shop", text_font: font_small, pad_all: 0}
+
+                                # --- SQUARE 7 (Front Door) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - lambda: |-
+                                                if (id(front_door_lock).state == lock::LOCK_STATE_LOCKED) {
+                                                  id(front_door_lock).unlock();
+                                                } else {
+                                                  id(front_door_lock).lock();
+                                                }
+                                          widgets:
+                                            - label: {id: front_door_icon, text_font: mdi_lock, text: "\U000F0CCC"}
+                                            - label: {text: "Front", text_font: font_small}
+
+                                # --- SQUARE 8 (Back Door) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - lambda: |-
+                                                if (id(back_door_lock_proxy).state == lock::LOCK_STATE_LOCKED) {
+                                                  id(back_door_lock_proxy).unlock();
+                                                } else {
+                                                  id(back_door_lock_proxy).lock();
+                                                }
+                                          widgets:
+                                            - label: {id: back_door_icon, text_font: mdi_lock, text: "\U000F0CCC"}
+                                            - label: {text: "Back", text_font: font_small}
+
+                                # --- SQUARE 9 (West Door) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - lambda: |-
+                                                if (id(shed_west_door).state == lock::LOCK_STATE_LOCKED) {
+                                                  id(shed_west_door).unlock();
+                                                } else {
+                                                  id(shed_west_door).lock();
+                                                }
+                                          widgets:
+                                            - label: {id: west_door_icon, text_font: mdi_lock, text: "\U000F0CCC"}
+                                            - label: {text: "West", text_font: font_small}
+
+                                # --- SQUARE 10 (East Door) ---
+                                - obj:
+                                    width: 60
+                                    height: 80
+                                    radius: 14
+                                    bg_color: 0x000000
+                                    bg_opa: 18%
+                                    pad_all: 0
+                                    border_width: 0
+                                    widgets:
+                                      - button:
+                                          width: 100%
+                                          height: 100%
+                                          bg_opa: 0%
+                                          pad_all: 0
+                                          border_width: 0
+                                          shadow_width: 0
+                                          layout: {type: flex, flex_flow: column, flex_align_main: CENTER, flex_align_cross: CENTER}
+                                          on_click:
+                                            - lambda: |-
+                                                if (id(shed_east_door).state == lock::LOCK_STATE_LOCKED) {
+                                                  id(shed_east_door).unlock();
+                                                } else {
+                                                  id(shed_east_door).lock();
+                                                }
+                                          widgets:
+                                            - label: {id: east_door_icon, text_font: mdi_lock, text: "\U000F0CCC"}
+                                            - label: {text: "East", text_font: font_small}
+
+
+########################################################     Don't Change Anything Below   #####################################################
+
+### Display
+display:
+  - platform: mipi_rgb
+    model: ESP32-S3-TOUCH-LCD-7-800X480
+    id: waveshare_display
+    update_interval: never
+    auto_clear_enabled: false
+    color_order: RGB
+    pclk_frequency: 16MHZ
+    dimensions:
+      width: 800
+      height: 480
+    de_pin:
+      number: 5
+    hsync_pin:
+      number: 46
+      ignore_strapping_warning: true
+    vsync_pin:
+      number: 3
+      ignore_strapping_warning: true
+    pclk_pin: 7
+    pclk_inverted: true
+    reset_pin:
+      ch422g: ch422g_hub
+      number: 3
+    hsync_back_porch: 8
+    hsync_front_porch: 8
+    hsync_pulse_width: 4
+    vsync_back_porch: 16
+    vsync_front_porch: 16
+    vsync_pulse_width: 4
+    data_pins:
+      red:
+        - 1         #r3
+        - 2         #r4
+        - 42        #r5
+        - 41        #r6
+        - 40        #r7
+      blue:
+        - 14        #b3
+        - 38        #b4
+        - 18        #b5
+        - 17        #b6
+        - 10        #b7
+      green:
+        - 39        #g2
+        - 0         #g3
+        - 45        #g4
+        - 48        #g5
+        - 47        #g6
+        - 21        #g7
+
+
+### Touchscreen
+touchscreen:
+  platform: gt911
+  id: waveshare_touch
+  interrupt_pin: GPIO4
+  reset_pin:
+    ch422g: ch422g_hub
+    number: 1
+    mode: OUTPUT
